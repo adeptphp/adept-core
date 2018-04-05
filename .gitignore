@@ -1,0 +1,10 @@
+./vendor
+./.idea
+./.vscode
+./build
+/vendor
+/.idea
+/.vscode
+/.vagrant
+.DS_Store
+

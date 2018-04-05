@@ -1,0 +1,37 @@
+{
+    "name": "adeptphp/adept-core",
+    "description": "PHP Framework for Today",
+    "authors": [
+        {
+            "name": "Jim Shannon",
+            "email": "jim@hltky.com"
+        }
+    ],
+    "require": {
+        "php": ">=7.1",
+        "jshannon63/cobalt": "@dev",
+        "nikic/fast-route": "^1.3",
+        "monolog/monolog": "^1.23",
+        "vlucas/phpdotenv": "^2.4",
+        "filp/whoops": "^2.1",
+        "symfony/var-dumper": "^4.0",
+        "twig/twig": "~2.0",
+        "psr/http-server-middleware": "^1.0",
+        "atomwares/atom-http": "^1.0",
+        "symfony/console": "^4.0"
+    },
+    "autoload": {
+        "psr-4": {
+          "Adept\\": "src/"
+        },
+        "files": [
+            "src/Misc/helpers.php"
+        ]
+    },
+    "repositories": [
+        {
+            "type": "path",
+            "url": "/Users/jim/Code/packages/Cobalt"
+        }
+    ]
+}
