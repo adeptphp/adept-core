@@ -2,11 +2,12 @@
 
 namespace Adept\Application;
 
-use Adept\Application\Facades\Facade;
 use Adept\Event\EventManagerInterface;
+use Adept\Application\Facades\Facade;
 use Adept\Console\ConsoleApplication;
 use Adept\Session\SessionInterface;
 use Adept\Config\ConfigInterface;
+use Jshannon63\Cobalt\Container;
 use Adept\Route\RouterInterface;
 use Adept\Http\RequestInterface;
 use Adept\Log\LoggerInterface;
@@ -16,9 +17,9 @@ use Adept\Console\Command;
 use Adept\Config\Config;
 use Adept\Route\Router;
 use Adept\Http\Request;
-use Adept\Log\Log;
-use Jshannon63\Cobalt\Container;
+use Adept\Console\Cron;
 use DirectoryIterator;
+use Adept\Log\Log;
 use Dotenv\Dotenv;
 use Exception;
 
@@ -33,13 +34,12 @@ class Application extends Container implements ApplicationInterface
     protected $applicationPath;
     protected $configPath;
     protected $config;
-    protected $providers = [];
-    protected $controllers = [];
+    protected $providers;
+    protected $controllers;
     protected $request;
     protected $router;
     protected $events;
     public $console;
-
 
     public function __construct($applicationPath, $configPath = null)
     {
@@ -48,60 +48,53 @@ class Application extends Container implements ApplicationInterface
         $this->applicationPath = $applicationPath;
         $this->configPath = $configPath?$configPath:$applicationPath.'/config';
         $this->config = $this->loadConfiguration();
+        if(!config('app.key')){
+            throw new \RuntimeException('Application key is required to be set in environment.');
+        }
+        $this->providers = [];
+        $this->controllers = [];
+        date_default_timezone_set(config('app.timezone'));
         $this->registerErrorHandler();
         $this->registerLogger();
         $this->initializeEventManager();
-        $this['eventmanager']->trigger('config.loaded');
-        if($this->consoleApp()) {
-            $this->console = new ConsoleApplication(env('APP_NAME'), $this->version());
-        }
     }
 
     /**
      * Run the application.
      *
-     * @throws \Jshannon63\Cobalt\ContainerException
+     * @param null $mode
      */
-    public function run()
+    public function run($mode = 'http')
     {
-        $this->startSession();
-        $this->getRequest();
-        $this->intializeRouter();
-
-        $this->registerClasses(config('app.providers') ,'registerProviders');
-
-        $this->registerClasses([__DIR__.'/Facades'],'registerFacades');
-
-        $this->registerClasses(config('app.events'),'registerEvents');
-        $this->registerClasses(config('app.listeners'),'registerListeners');
-
-        $this->bootProviders();
-
-        $this->registerClasses(config('app.routes'),'registerRoutes');
-        $this['router']->compile();
-        $this['router']->process();
-
-        $this->registerClasses(config('app.controllers'),'registerControllers');
-
-        if($this->request()->getMethod()){
-            echo $this['router']->dispatch();
+        if($mode === 'http'){
+            $this->startSession();
+            $this->intializeRouter();
         }
 
-       if($this->consoleApp()) {
-            $this->registerClasses(config('app.commands'),'registerCommands');
+        $this->registerProviders();
+        $this->registerFacades();
+        $this->registerEvents();
+        $this->registerListeners();
+        $this->bootProviders();
+        $this->registerControllers();
+
+
+        if($mode == 'http'){
+            $this->getRequest();
+            $this->registerRoutes();
+            list($responseCode, $responseBody) = $this['router']->dispatch($this->request()->getMethod(), $this->request()->getUri());
+            http_response_code($responseCode);
+            echo $responseBody;
+        }
+
+        if($mode == 'console' && $this->consoleApp()) {
+            $this->console = new ConsoleApplication(env('APP_NAME'), $this->version());
+            $this->registerCommands();
             $this->console->run();
         }
 
-    }
-
-    /**
-     * @param $directories
-     * @param $action
-     */
-    private function registerClasses($directories, $action){
-//        dd($directories);
-        foreach ($directories as $directory){
-            $this->$action($directory);
+        if($mode == 'cron' && $this->consoleApp()) {
+            $this->registerCrons();
         }
     }
 
@@ -111,7 +104,8 @@ class Application extends Container implements ApplicationInterface
      * @throws \Jshannon63\Cobalt\ContainerException
      * @throws \Jshannon63\Cobalt\NotFoundException
      */
-    private function startSession(){
+    private function startSession()
+    {
         $this->bind(SessionInterface::class, Session::class, true);
         $this->alias('session', SessionInterface::class);
     }
@@ -122,7 +116,8 @@ class Application extends Container implements ApplicationInterface
      * @throws \Jshannon63\Cobalt\ContainerException
      * @throws \Jshannon63\Cobalt\NotFoundException
      */
-    private function getRequest(){
+    private function getRequest()
+    {
         $this->request = $this->make(RequestInterface::class, Request::class, true);
         $this->alias('request', RequestInterface::class);
     }
@@ -140,7 +135,7 @@ class Application extends Container implements ApplicationInterface
                 return new Dotenv($this->applicationPath);
             }, true)->load();
         } else {
-            throw new exception('Missing environment file (.env) in application default applicationPath.');
+            throw new exception('Missing environment file (.env). Not found in application path '.$this->applicationPath.'.');
         }
         if (is_dir($this->configPath)) {
             $this->make(ConfigInterface::class, function () {
@@ -148,21 +143,9 @@ class Application extends Container implements ApplicationInterface
             }, true);
             $this->alias('config', ConfigInterface::class);
         } else {
-            throw new exception('Missing configuration settings (/config directory) in application default applicationPath.');
+            throw new exception('Missing configuration settings (/config directory). Not found in configuration path '.$this->configPath.'.');
         }
         return $this[ConfigInterface::class]->get();
-    }
-
-    /**
-     * Load any externally created aliases from the application config file.
-     * Config file is ($applicationPath/config/app.php)
-     *
-     */
-    private function loadAliases()
-    {
-        foreach (config('app.aliases') as $key => $alias) {
-            $this->alias($key, $alias);
-        }
     }
 
     /**
@@ -199,7 +182,8 @@ class Application extends Container implements ApplicationInterface
      * @throws \Jshannon63\Cobalt\ContainerException
      * @throws \Jshannon63\Cobalt\NotFoundException
      */
-    private function initializeEventManager(){
+    private function initializeEventManager()
+    {
         $this->make(EventManagerInterface::class, function () {
             return new EventManager($this->getContainer());
         }, true);
@@ -207,32 +191,30 @@ class Application extends Container implements ApplicationInterface
     }
 
     /**
-     * @param $directory
-     * @throws \Jshannon63\Cobalt\ContainerException
+     * Register all externally declared service events.
+     *
+\     * @throws \Jshannon63\Cobalt\ContainerException
      * @throws \Jshannon63\Cobalt\NotFoundException
      */
-    private function registerEvents($directory){
-
-        $events = getClassFiles($directory);
-
-        foreach ($events as $count => $event){
+    private function registerEvents()
+    {
+        $this->registerClasses(config('app.events'), function($event){
             $this->bind(strtolower('App.Events.'.$event['basename']), $event['classname'], true);
             $this[strtolower('App.Events.'.$event['basename'])]->setName(strtolower('App.Events.'.$event['basename']));
-        }
+        }, \Adept\Event\Event::class);
     }
 
     /**
-     * @param $directory
+     * Register all externally declared service listeners.
+     *
      * @throws \Jshannon63\Cobalt\ContainerException
      * @throws \Jshannon63\Cobalt\NotFoundException
      */
-    private function registerListeners($directory)
+    private function registerListeners()
     {
-        $listeners = getClassFiles($directory);
-
-        foreach ($listeners as $count => $listeners) {
-            $this->bind(strtolower('App.Listeners.'.$listeners['basename']), $listeners['classname'], true);
-        }
+        $this->registerClasses(config('app.listeners'), function($listener){
+            $this->bind(strtolower('App.Listeners.'.$listener['basename']), $listener['classname'], true);
+        }, \Adept\Event\Listener::class);
     }
 
     /**
@@ -240,23 +222,14 @@ class Application extends Container implements ApplicationInterface
      *
      * @throws \Jshannon63\Cobalt\ContainerException
      */
-    private function registerProviders($directory)
+    private function registerProviders()
     {
-        $providers = getClassFiles($directory);
-
-        foreach ($providers as $provider){
-            if(!class_exists($provider['classname'])){
-                require_once $provider['pathname'];
-            }
-            if(get_parent_class($provider['classname']) != ServiceProvider::class){
-                throw new Exception('Attempt to register '.$provider['classname'].
-                    ' as a ServiceProvider failed. A Service Provider must extend ',ServiceProvider::class);
-            }
+        $this->registerClasses(config('app.providers'),function($provider){
             $this->bind($provider['classname'], $provider['classname'], true);
             $this->alias($provider['basename'], $provider['classname']);
             $this[$provider['basename']]->register($this);
             $this->providers[] = $provider['basename'];
-        }
+        }, ServiceProvider::class);
     }
 
     /**
@@ -276,38 +249,35 @@ class Application extends Container implements ApplicationInterface
      * @throws \Jshannon63\Cobalt\ContainerException
      * @throws \Jshannon63\Cobalt\NotFoundException
      */
-    private function intializeRouter(){
-        $this->make(RouterInterface::class, function () {
-            return new Router(app());
+    private function intializeRouter()
+    {
+        $this->bind(RouterInterface::class, function () {
+            return new Router(app(), config('app.router'));
         }, true);
         $this->alias('router', RouterInterface::class);
         $this->router = $this['router'];
-
-        if (config('app.router.cached')) {
-            $this->router()->cache($this->path().config('app.router.cachefile'));
-        }
     }
 
     /**
      * Register Route Files
-     * @param $directory
+     *
      * @throws \Jshannon63\Cobalt\ContainerException
      * @throws \Jshannon63\Cobalt\NotFoundException
      */
-    private function registerRoutes($directory){
-
-        $routefiles = getClassFiles($directory);
-
-        foreach($routefiles as $count => $routefile){
-            if (config('app.router.cached') && file_exists($this->path().config('app.router.cachefile'))) {
-                if (filemtime($routefile['pathname']) > filemtime($this->path().config('app.router.cachefile'))) {
-                    $this->router()->bustCache();
+    private function registerRoutes()
+    {
+        foreach (config('app.routes') as $directory){
+            $routefiles = getClassFiles($directory);
+            foreach($routefiles as $count => $routefile){
+                if (config('app.router.cached') && file_exists($this->path().config('app.router.cachefile'))) {
+                    if (filemtime($routefile['pathname']) > filemtime($this->path().config('app.router.cachefile'))) {
+                        $this->router()->bustCache();
+                    }
                 }
+                require_once $routefile['pathname'];
             }
-            require_once $routefile['pathname'];
         }
     }
-
 
     /**
      * Register externally declared controllers
@@ -316,61 +286,72 @@ class Application extends Container implements ApplicationInterface
      * @throws \Jshannon63\Cobalt\ContainerException
      * @throws \Jshannon63\Cobalt\NotFoundException
      */
-    private function registerControllers($directory)
+    private function registerControllers()
     {
-        $controllers = getClassFiles($directory);
-
-        foreach ($controllers as $controller){
-            if(!class_exists($controller['classname'])){
-                require_once $controller['pathname'];
-            }
-            if(get_parent_class($controller['classname']) != Controller::class){
-                throw new Exception('Attempt to register '.$controller['classname'].
-                    ' as a Controller failed. A Controller must extend ',Controller::class);
-            }
+        $this->registerClasses(config('app.controllers'), function($controller){
             $this->bind($controller['classname'], $controller['classname'], true);
             $this->alias($controller['basename'], $controller['classname']);
             $this->controllers[] = $controller['basename'];
-        }
+        }, \Adept\Application\Controller::class);
     }
 
     /**
      * Register all externally declared commands.
      */
-    private function registerCommands($directory)
+    private function registerCommands()
     {
-        $commands = getClassFiles($directory);
-
-        foreach ($commands as $command){
-            if(!class_exists($command['classname'])){
-                require_once $command['pathname'];
-            }
-            if(get_parent_class($command['classname']) != Command::class){
-                throw new Exception('Attempt to register '.$command['classname'].
-                    ' as a Command failed. A Command must extend ',Command::class);
-            }
+        $directories = config('app.commands');
+        array_unshift($directories, __DIR__.'/../Console/Commands');
+        $this->registerClasses($directories, function($command){
             $this->bind($command['classname'], $command['classname'], true);
             $this->console->add($this[$command['classname']]);
-        }
+        }, \Adept\Console\Command::class);
+    }
+
+    /**
+     * Register and fire-if-due, all externally declared crons.
+     */
+    private function registerCrons()
+    {
+        $this->registerClasses(config('app.crons'), function($cron){
+            (new $cron['classname'])->process();
+        }, \Adept\Console\Cron::class);
     }
 
     /**
      * Register all externally declared facades.
      */
-    private function registerFacades($directory)
+    private function registerFacades()
     {
-        $facades = getClassFiles($directory);
+        $this->registerClasses([__DIR__.'/Facades'],null, Facade::class);
+    }
 
-        foreach ($facades as $facade){
-            if($facade['classname'] == Facade::class){
-                continue;
-            }
-            if(!class_exists($facade['classname'])){
-                require_once $facade['pathname'];
-            }
-            if(get_parent_class($facade['classname']) != Facade::class){
-                throw new Exception('Attempt to register '.$facade['classname'].
-                    ' as a Facade failed. A Facade must extend '.Facade::class);
+    /**
+     * @param $directories
+     * @param callable|null $callback
+     * @param null $parent
+     * @throws Exception
+     */
+    private function registerClasses($directories, callable $callback=null, $parent=null)
+    {
+        foreach ($directories as $directory){
+            $classes = getClassFiles($directory);
+            foreach ($classes as $class) {
+                if($class['classname'] == $parent){
+                    continue;
+                }
+                if (! class_exists($class['classname'])) {
+                    require_once $class['pathname'];
+                }
+                if($parent) {
+                    if (get_parent_class($class['classname']) != $parent) {
+                        throw new Exception('Attempt to register '.$class['classname'].
+                            ' failed. Class must extend '.$parent);
+                    }
+                }
+                if(is_callable($callback)) {
+                    $callback($class);
+                }
             }
         }
     }

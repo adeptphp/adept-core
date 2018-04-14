@@ -2,25 +2,17 @@
 
 namespace Adept\Route;
 
-use Jshannon63\Cobalt\ContainerInterface;
+use Psr\Container\ContainerInterface;
 
 interface RouterInterface
 {
-    public function __construct(ContainerInterface $container);
+    public function __construct(ContainerInterface $container, Array $config);
 
-    public function compile();
-
-    public function process($method = null, $uri = null);
-
-    public function dispatch();
+    public function dispatch($method, $uri);
 
     public function add($method, $uri, $action);
 
     public function group($prefix, callable $callback);
-
-    public function list();
-
-    public function cache($cachefile = null);
 
     public function bustCache();
 }

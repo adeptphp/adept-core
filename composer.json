@@ -18,7 +18,9 @@
         "twig/twig": "~2.0",
         "psr/http-server-middleware": "^1.0",
         "atomwares/atom-http": "^1.0",
-        "symfony/console": "^4.0"
+        "symfony/console": "^4.0",
+        "dragonmantank/cron-expression": "^2.0",
+        "doctrine/dbal": "^2.7"
     },
     "autoload": {
         "psr-4": {

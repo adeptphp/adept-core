@@ -274,8 +274,9 @@ if (! function_exists('str_slug')) {
 if (! function_exists('getClassFiles')) {
     function getClassFiles($directory): array
     {
+        $files = [];
         if (! is_dir($directory)) {
-            return null;
+            return $files;
         }
         foreach (new DirectoryIterator($directory) as $count => $fileInfo) {
             if (! $fileInfo->isDot()) {

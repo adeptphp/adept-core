@@ -13,7 +13,7 @@ interface RouteInterface
      */
     public function __construct($method, $uri);
 
-    public function setName(string $name);
+    public function name(string $name);
 
     public function getName();
 

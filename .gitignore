@@ -1,7 +1,4 @@
-./vendor
-./.idea
-./.vscode
-./build
+/build
 /vendor
 /.idea
 /.vscode

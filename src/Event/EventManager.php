@@ -9,7 +9,7 @@ use InvalidArgumentException;
 class EventManager implements EventManagerInterface
 {
     protected $container;
-
+    protected $events = [];
     public $bindings = [];
 
     public function __construct(ContainerInterface $container = null)
@@ -112,11 +112,17 @@ class EventManager implements EventManagerInterface
         if ($event instanceof EventInterface) {
             if (!$this->container->has($event)) {
                 if (!$event->getName()) {
-                    throw new InvalidArgumentException('Supplied Event ('.get_class($event).') requires name a valid name property.');
+                    throw new InvalidArgumentException('Supplied Event ('.get_class($event).') requires a valid name property.');
                 }
                 $this->container->bind($event->getName(), function () use ($event) {
                     return $event;
                 }, true);
+            }
+            if($target){
+                $event->setTarget($target);
+            }
+            if($argv){
+                $event->setParams($argv);
             }
             $event = $event->getName();
         }
@@ -134,5 +140,15 @@ class EventManager implements EventManagerInterface
             }
         }
         return $this->container[$event];
+    }
+
+    public function registerEvent(Event $event)
+    {
+
+    }
+
+    public function getEvents()
+    {
+        return $this->events;
     }
 }
